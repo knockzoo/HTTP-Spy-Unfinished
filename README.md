@@ -29,3 +29,10 @@ The full list of features:
   1. The HTTP Spy now uses the data serializer I recently uploaded in a seperate repository, which should provide a slightly different and more readable output
 - Improved Code Quality & Readability
   1. This release uses a proper project environment, with improved all around code quality and far more documentation
+
+## Liability & Usage Expectations
+I am not liable for any damages caused by the usage of this project.
+This project is not intended for and is not encouraged to be used for illegal or unauthorized penetrational testing or otherwise illegal or condemned actions.
+You are expected to use this within any terms and conditions or any expectations that are applicable.
+
+**Please, do not use this on a whitelist without permission.**
