@@ -1,0 +1,9 @@
+# VSCode Settings
+.vscode
+
+# Project place file
+/HTTP-Spy.rbxm
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
