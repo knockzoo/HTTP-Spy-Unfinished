@@ -31,12 +31,98 @@ local Settings = getfenv().Settings or {
 
 Utils:HideFromGC(Settings)
 
--- Designed with Ro-Exec (Krampus) in mind for
+-- Designed with Ro-Exec (Krampus) in mind for | Nevermind, fuck you krampus
 -- both the bypasses, and the hooks themselves
 
 -- This is a WIP, and is not finished - yet.
 -- Use any source code used in this project
 -- or it's methods at your own discretion.
+
+-- Debug info based bypasses
+
+local OldDebugInfo = {}
+local GetConstants, GetUpvalues, GetProtos, GetInfo = debug.getconstants, debug.getupvalues, debug.getprotos, debug.getinfo
+--[[
+    Structure:
+        OldDebugInfo[func] = {
+            Constants = {
+
+            },
+            Upvalues = {
+
+            },
+            Protos = {
+
+            },
+            Info = {
+
+            }
+        }
+]]--
+
+local DebugHook = function(Type, Old, Function, ...) -- Type: Constants/Upvalues/Info, Old: The original function, Function: Every debug function being hooked here expects a function as the first parameter
+    assert(Function, "i actually need to put proper debug info here at some point")
+
+    local SpoofedValue = OldDebugInfo[Function]
+    if SpoofedValue then
+        return SpoofedValue[Type]
+    end
+
+    return Old(Function, ...)
+end
+
+local OldGetConstants
+OldGetConstants = hookfunction(GetConstants, newcclosure(function(Function, ...)
+    return DebugHook("Constants", OldGetConstants, Function, ...)
+end))
+
+local OldGetUpvalues
+OldGetUpvalues = hookfunction(GetUpvalues, newcclosure(function(Function, ...)
+    return DebugHook("Upvalues", OldGetUpvalues, Function, ...)
+end))
+
+local OldGetProtos
+OldGetProtos = hookfunction(GetProtos, newcclosure(function(Function, ...)
+    return DebugHook("Protos", OldGetProtos, Function, ...)
+end))
+
+local OldGetInfo
+OldGetInfo = hookfunction(GetInfo, newcclosure(function(Function, ...) -- I don't actually remember if getinfo's response is dynamic and based off of the environment/level it was called from, but cba to check
+    return DebugHook("Info", OldGetInfo, Function, ...)
+end))
+
+Utils:BulkHide({OldDebugInfo, GetConstants, GetUpvalues, GetInfo, DebugHook, OldGetConstants, OldGetUpvalues, GetProtos, OldGetInfo}) -- Some inferior anti HTTP spies will look for debug usage in the garbage collector
+
+for Index, Function in pairs(Settings.Hook) do
+    local Constants, Upvalues, Protos, Info = GetConstants(Function), GetUpvalues(Function), GetProtos(Function), GetInfo(Function) -- Since these are only getting called once and they're getting called immediately, there's no point in using clonefunction
+    
+    OldDebugInfo[Function] = {
+        Constants = Constants,
+        Upvalues = Upvalues,
+        Protos = Protos,
+        Info = Info
+    }
+
+    Utils:BulkHide({Constants, Upvalues, Protos, Info})
+end
+
+-- Environment based bypasses
+-- Misleading, I only have one :(
+
+local OldGetFenv
+OldGetFenv = hookfunction(getfenv, newcclosure(function(Level)
+    local Result = OldGetFenv(Level)
+
+    if Level == 0 then
+        local New = Utils:CloneTable(Result)
+
+        if New.script then
+            New.Script:SetAttribute('name', 'LocalScript') -- on UWP executors, getfenv(0).script.name always returned 'LocalScript' - so I don't actually know if this still works, of if SetAttribute functions like I think it does bug GG regardless, this is a cool method
+        end
+    end
+end))
+
+-- Actual request hooking
 
 local RequestArgs = ArgumentBuilder.BuildArguments({
     Expected = { Url = { Type = "string" }, Method = { Type = "string" }, Body = { Type = "string" }, Headers = { Type = "table" }},
@@ -49,6 +135,9 @@ local RequestHook = function(Old, Options) -- Krampus pushed an update which mad
     -- As of now, with a few careful `pcall` checks you can easily detect this hook by comparing errors
 
     local NewOptions = Utils:CloneTable({Table = Options, Method = 1})
+    setmetatable(NewOptions, {
+        __mode = "kv" -- Extra layer of UD
+    })
 
     local Args = RequestArgs(NewOptions)
     Utils:HideFromGC(Args)
@@ -93,6 +182,8 @@ local RequestHook = function(Old, Options) -- Krampus pushed an update which mad
 
     return Result
 end
+
+Utils:HideFromGC(RequestHook)
 
 for i,v in pairs(Settings.Hook) do
     local Old = v

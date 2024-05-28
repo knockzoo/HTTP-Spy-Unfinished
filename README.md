@@ -25,6 +25,13 @@ The full list of features:
      1. Objects are removed from the garbage collector
      2. Tables will be deepcloned without calling `pairs`/`next` (frequently used for detections)
      3. The random number generator uses a harder to predict seed - meaning any detections which would, for example, try to predict any spoofed IP addresses should no longer work
+     4. Original function's debug information is preserved
+     5. Bypasses for anti HTTP spies that look for constants within the garbage collector, such as function's containing `hookfunction` are now spoofed
+     6. Envrionment based bypasses *may* prevent anti HTTP spies which use getfenv(0).script based detections
+     7. More bypasses for preventing data from being recovered via the garbagecollector, now certain values are removed on a Lua interpreter level as opposed to just hiding them from `getgc` results
+     8. RNG has a reworked seed generator, and should now be significantly harder to predict
+     9. Traceback information is now dynamically spoofed, and it should be harder to detect the request hooks
+     10. Metatables are now hidden from `getmetatable`
 - Re-worked Data Serialization
   1. The HTTP Spy now uses the data serializer I recently uploaded in a seperate repository, which should provide a slightly different and more readable output
 - Improved Code Quality & Readability

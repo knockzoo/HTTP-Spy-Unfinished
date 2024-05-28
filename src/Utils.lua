@@ -36,7 +36,7 @@ function JSON:Decode(Table)
 	return HTTP:JSONDecode(Table)
 end
 
-local Hidden = {}
+local HiddenGC = {}
 
 function Utils:Remove(Table, Index)
     if Index == nil then
@@ -50,14 +50,49 @@ function Utils:Remove(Table, Index)
     return Result
 end
 
-local OldGC = getgc
+local IsOurClosure = clonefunction(isexecutorclosure or isourclosure)
+local GetConstants = clonefunction(debug.getconstants) -- Unlike the GetConstants in Main, this will be called long after execution - so it needs to remain unhooked
+local Pcall = clonefunction(pcall)
+local Tostring = clonefunction(tostring)
+
+local OldGC = clonefunction(getgc)
 OldGC = hookfunction(getgc, function(...)
     local Result = OldGC(...)
     Result = Utils:CloneTable(Result)
 
-    for i,v in pairs(Result) do
-        if Hidden[v] then
+    for i,v in pairs(Result) do -- Technically you could hook pairs and do a hard coded EQ against what you predict to be in the garbage collector (force known values to be garbage collected) to ultimately see if the GC results are being ran through pairs - but too many scripts do this so it'd be unreliable in a WL, it'd only work as a POC
+        if HiddenGC[v] then
             Utils:Remove(Result, i)
+        else -- You can take what anti HTTP spies do when looking through the garbage collector, apply the exact same logic, and just remove the objects LOL
+            if type(v) == 'function' then
+                if IsOurClosure(v) then
+                    local Success, Constants = Pcall(GetConstants, v)
+                    if Success then
+                        setmetatable(Constants, { -- Just to prevent anyone defining a function with an L closure and embeding specific constants, so they can check if those constants are showing up in the garbage collector more then expected
+                            __mode = "kv"
+                        })
+
+                        local ConstantIndex = 0
+                        local HookCount = 0
+                        while true do
+                            ConstantIndex = ConstantIndex + 1
+                            if ConstantIndex == #Constants then
+                                break
+                            end
+
+                            local AsString = Tostring(Constants[ConstantIndex])
+
+                            if AsString == 'hookfunction' or AsString == 'hookmetamethod' then -- I still don't know why anti HTTP spies do this, it's so unreliable
+                                HookCount = HookCount + 1
+
+                                if HookCount > 2 then
+                                    Utils:Remove(Result, i) -- Censorship!!
+                                end
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
 
@@ -65,11 +100,11 @@ OldGC = hookfunction(getgc, function(...)
 end)
 
 function Utils:HideFromGC(Object)
-    Hidden[Object] = true
+    HiddenGC[Object] = true
 end
 
-function Utils:UnhideFromGC(Object)
-    Hidden[Object] = nil
+function Utils:UnhideFromGC(Object) -- Not really used anywhere, just added for funsies
+    HiddenGC[Object] = nil
 end
 
 function Utils:BulkHide(Objects)
@@ -81,6 +116,52 @@ function Utils:BulkHide(Objects)
         end
     end
 end
+
+local HiddenMT = {}
+
+function Utils:HideMetatable(Object)
+    HiddenMT[#HiddenMT + 1] = Object
+    return Object
+end
+
+local OldGetMT = clonefunction(getmetatable)
+OldGetMT = hookfunction(getmetatable, newcclosure(function(...)
+    local Success, Result = Pcall(OldGetMT, ...)
+    Utils:HideFromGC(Result)
+    if Success then
+        local AsTable = (...)
+        Utils:HideFromGC(AsTable)
+
+        if HiddenMT[AsTable] then
+            return nil
+        end
+    end
+
+    return Result
+end))
+
+local SetMetatable = clonefunction(setmetatable)
+
+local OldTraceback = clonefunction(debug.gettraceback)
+OldTraceback = hookfunction(debug.traceback, newcclosure(function(...)
+    local RealTraceback = OldTraceback(...) - 1
+
+    local Metatable = Utils:HideMetatable({}, {
+        __eq = function(self, Other)
+            if RealTraceback > Other then
+                if RealTraceback - Other < 2 then -- The request hook can add an extra traceback level, so anything like 'SuperRequest' could very easily detect this HTTP spy, unless the traceback info is smartly hooked
+                    return true
+                end
+            end
+
+            return false
+        end,
+        __metatable = nil
+    })
+
+    Utils:HideFromGC(Metatable)
+    return Metatable
+end))
 
 local CloneTableArgs = ArgumentBuilder.BuildArguments({
     Expected = { Table = { Type = "table" }, Method = { Type = "number" }, Cloned = { Type = "table" } },
@@ -100,6 +181,7 @@ function Utils:CloneTable(...)
         Table = Table + idkwhythisworksLOL
 
         Utils:HideFromGC(idkwhythisworksLOL)
+        Utils:HideMetatable(idkwhythisworksLOL)
 
         for i, v in next, Table, nil do
             if type(v) == "table" then
@@ -165,6 +247,5 @@ function Utils:MaliciousSearch(String)
     return false
 end
 
-Utils:BulkHide({Utils, JSON, Hidden, Services, HTTP, OldGC, GetMT, MaliciousUrls, FakeIP, FakeHWID, ActualIP, ActualHWID})
-
+Utils:BulkHide({Utils, JSON, Hidden, Services, HTTP, OldGC, GetMT, HiddenMT, OldTraceback, MaliciousUrls, FakeIP, FakeHWID, ActualIP, ActualHWID})
 return { Utils = Utils, JSON = JSON, Services = Services }
